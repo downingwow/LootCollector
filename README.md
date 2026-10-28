@@ -1,31 +1,32 @@
-# LootCollector
+# LootCollector — Conquest of Azeroth
 
-Worldforged item, vendor, rare, chest, and loot discovery tracking.
+A community-powered discovery addon for **Ascension: Conquest of Azeroth / Conquest Reborn**, extending LootCollector's original Worldforged-item and vendor tracking with rare-creature and chest discoveries.
 
-An addon for **Ascension: Conquest of Azeroth** on Conquest Reborn. Maintained by Uncle Bone.
+## Features
 
-## Download
+- Track and share discovered **Worldforged items**, Mystic Scroll locations, and vendors.
+- **Rare creature and treasure chest tracking** with map and minimap markers.
+- Searchable rare/chest listings alongside the original LootCollector viewer.
+- Record discovered locations and sightings; deduplication helps avoid repeated pins from the same target.
+- Rare/chest tooltips with known creature information and available drop data.
+- Automatic **loot-table learning** from observed loot, with saved discovery data.
+- Rare/chest location and loot-information sharing; right-click contextual sharing and chat-linked information.
+- Cooperative global data exchange through LootCollector's existing `BBLC25C` channel, with safe delayed startup so Questie-X and DBM-CoA can coexist.
+- Companion folders **LootCollector_CustomImport** (large database imports) and **LootCollector_StarterDB** (optional starter database).
+- Spawn/sighting information and import support for community-maintained discoveries.
 
-[Latest stable release](https://github.com/robsdow87/LootCollector/releases/latest) · [Previous versions](https://github.com/robsdow87/LootCollector/releases)
+Some information, including loot tables and spawn timing, is learned from player observations and may be incomplete or approximate.
 
-**No release has been published yet.** Current source files must be verified before the first release.
+## Current source package
+
+**Safe Channel Startup** is the latest available package, built on LootCollector 1.0.6 with rare/chest extensions. Source files and a downloadable GitHub Release are **not yet published**.
 
 ## Installation
 
-1. Download the ZIP attached to a published GitHub Release (not the automatic GitHub source archive).
-2. Extract into your World of Warcraft `Interface/AddOns` directory.
-3. Ensure the `LootCollector` folder contains its `.toc` file; restart the game.
+After a release is published, extract all three folders—`LootCollector`, `LootCollector_CustomImport`, and `LootCollector_StarterDB`—into `Interface/AddOns`. The companion folders are included intentionally.
 
-## Compatibility
+## Downloads and support
 
-Built for the legacy client used by Ascension: Conquest of Azeroth. Questie-X, DBM-CoA, and LootCollector use LootCollector's existing shared channel `BBLC25C`, with distinct message protocols. Preserve compatibility with older clients and addon versions when updating.
+[Releases](https://github.com/downingwow/LootCollector/releases) · [Issues](https://github.com/downingwow/LootCollector/issues) · [Changelog](CHANGELOG.md)
 
-## Feedback
-
-[Report bugs and request features](https://github.com/robsdow87/LootCollector/issues). Include addon version, client version, error text, and steps to reproduce.
-
-## Release process
-
-When verified addon source is present in `LootCollector/`, pushing a version tag such as `v1.0.0` triggers the release workflow to validate the folder and package it as a downloadable ZIP. Earlier tagged releases remain accessible.
-
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+**Credits:** Original LootCollector by Skulltrail and community contributors; CoA extensions maintained by Uncle Bone. Community project; not an official Ascension release.
