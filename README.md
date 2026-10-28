@@ -81,7 +81,7 @@ Some actions may require a supported target, zone, or correctly formatted record
 
 ## Current build and limits
 
-**Latest package located:** *LootCollector — Safe Channel Startup*, based on **LootCollector 1.0.6 + Rare/Chest Tracker**. The verified ZIP **has not yet been uploaded as a GitHub Release**. [Downloads and version history](https://github.com/downingwow/LootCollector/releases).
+**Latest package located:** *LootCollector — Safe Channel Startup*, based on **LootCollector 1.0.6 + Rare/Chest Tracker**. The addon source folders have now been uploaded to this repository. **A downloadable GitHub Release has not yet been published.** [Downloads and version history](https://github.com/downingwow/LootCollector/releases).
 
 - Loot-table data grows from observations and is not necessarily complete.
 - Rare/chest locations and timers may be approximate.
