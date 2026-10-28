@@ -1,0 +1,1860 @@
+
+
+local L = LootCollector
+local Settings = L:NewModule("Settings", "AceConsole-3.0")
+local AceConfig = (LibStub and LibStub("AceConfig-3.0", true)) or nil
+local AceConfigDialog = (LibStub and LibStub("AceConfigDialog-3.0", true)) or nil
+
+StaticPopupDialogs["LOOTCOLLECTOR_CLEAN_INVALID"] = {
+	text = "Remove discoveries that are not Worldforged (or Mystic Scrolls on this realm) and restore StarterDB pin locations?\n\nLooted flags are kept. This does not override your database.",
+	button1 = "Remove",
+	button2 = "Cancel",
+	OnAccept = function()
+		local Core = L:GetModule("Core", true)
+		if Core and Core.RepairInvalidDiscoveries then
+			Core:RepairInvalidDiscoveries()
+		end
+	end,
+	timeout = 0,
+	whileDead = 1,
+	hideOnEscape = 1,
+}
+
+local function OpenCopyPopup(title, textToCopy)
+    local f = _G["LootCollectorCopyPopup"]
+    if not f then
+        f = CreateFrame("Frame", "LootCollectorCopyPopup", UIParent)
+        f:SetSize(560, 380)
+        f:SetPoint("CENTER")
+        f:SetFrameStrata("DIALOG")
+        f:SetMovable(true)
+        f:EnableMouse(true)
+        f:RegisterForDrag("LeftButton")
+        f:SetScript("OnDragStart", f.StartMoving)
+        f:SetScript("OnDragStop", f.StopMovingOrSizing)
+        f:SetBackdrop({
+            bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+            edgeFile = "Interface\\DialogBox\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = {left = 8, right = 8, top = 8, bottom = 8},
+        })
+        f:SetBackdropColor(0, 0, 0, 1)
+
+        f.title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        f.title:SetPoint("TOPLEFT", 16, -12)
+
+        f.scroll = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+        f.scroll:SetPoint("TOPLEFT", 16, -36)
+        f.scroll:SetPoint("BOTTOMRIGHT", -34, 48)
+
+        f.edit = CreateFrame("EditBox", nil, f.scroll)
+        f.edit:SetMultiLine(true)
+        f.edit:SetFontObject(ChatFontNormal)
+        f.edit:SetWidth(500)
+        f.edit:SetAutoFocus(false)
+        f.edit:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+        f.edit:EnableMouse(true)
+		f.edit:SetScript("OnTextChanged", function() end)
+		f.edit:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+        f.scroll:SetScrollChild(f.edit)
+
+        f.btnClose = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+        f.btnClose:SetSize(100, 22)
+        f.btnClose:SetPoint("BOTTOMRIGHT", -12, 12)
+        f.btnClose:SetText("Close")
+        f.btnClose:SetScript("OnClick", function() f:Hide() end)
+        
+        _G["LootCollectorCopyPopup"] = f
+    end
+
+    f.title:SetText(title)
+    f.edit:SetText(textToCopy)
+    f:Show()
+    f.edit:SetFocus()
+end
+
+local function refreshUI()
+	local Map = L:GetModule("Map", true)
+	if Map then
+        
+        Map.cacheIsDirty = true
+        
+        if Map.Update and WorldMapFrame and WorldMapFrame:IsShown() then
+            Map:Update()
+        end
+        
+        if Map.UpdateMinimap then
+            Map:UpdateMinimap() 
+        end
+    end
+    
+	local Arrow = L:GetModule("Arrow", true)
+	local hideAll = L.db and L.db.char and L.db.char.mapFilters and L.db.char.mapFilters.hideAll
+	if Arrow and Arrow.frame and hideAll then
+		Arrow.frame:Hide()
+	end
+end
+
+local function GetMinCompatibleVersion()
+	local Constants = L:GetModule("Constants", true)
+	return (Constants and Constants.MIN_COMPATIBLE_VERSION) or "1.0.0"
+end
+
+local function IsVersionAtLeastMin(ver)
+	local Constants = L:GetModule("Constants", true)
+	local minVer = GetMinCompatibleVersion()
+	if Constants and Constants.CompareVersions then
+		return Constants:CompareVersions(ver, minVer) >= 0
+	end
+	return true
+end
+
+local function BlockOutdatedSeenVersions()
+	local p = L.db and L.db.profile and L.db.profile.sharing
+	if not p then return end
+	p.blockedVersions = p.blockedVersions or {}
+	if p.seenVersions then
+		for ver in pairs(p.seenVersions) do
+			if not IsVersionAtLeastMin(ver) then
+				p.blockedVersions[ver] = true
+			end
+		end
+	end
+end
+
+local function CollectOutdatedSeenVersions()
+	local list = {}
+	local seen = L.db and L.db.profile and L.db.profile.sharing and L.db.profile.sharing.seenVersions
+	if seen then
+		for ver in pairs(seen) do
+			if not IsVersionAtLeastMin(ver) then
+				table.insert(list, ver)
+			end
+		end
+	end
+	table.sort(list)
+	return list
+end
+
+local function HasOutdatedSeenVersions()
+	return #CollectOutdatedSeenVersions() > 0
+end
+
+local function IsMysticScrollsHidden()
+	local Constants = L:GetModule("Constants", true)
+	return Constants and not Constants:HasMysticScrolls()
+end
+
+local function ShowTopContributors()
+    
+	local discoveries = L:GetDiscoveriesDB()
+	if not discoveries then
+		print("|cffff7f00LootCollector|r Database not found.")
+		return
+	end
+	local counts = {}
+	for _, d in pairs(discoveries) do
+		if d and d.fp and d.fp ~= "" and d.fp ~= "Unknown" then
+			counts[d.fp] = (counts[d.fp] or 0) + 1
+		end
+	end
+	local sorted = {}
+	for n, c in pairs(counts) do
+		table.insert(sorted, {n = n, c = c})
+	end
+	table.sort(sorted, function(a, b) return a.c > b.c end)
+	print("|cffffff00--- LootCollector Top Contributors ---|r")
+	for i = 1, math.min(10, #sorted) do
+		print(string.format("%d. |cffffff00%s|r: %d discoveries", i, sorted[i].n, sorted[i].c))
+	end
+end
+
+local function listToString(t)
+	if type(t) ~= "table" then return "" end
+	local names = {}
+	for name, on in pairs(t) do
+		if on and type(name) == "string" then
+			local s = name:gsub("^%s+", ""):gsub("%s+$", "")
+			if s ~= "" then table.insert(names, s) end
+		end
+	end
+	table.sort(names)
+	return table.concat(names, "\n")
+end
+
+local function stringToList(v, t)
+	if type(t) ~= "table" then return end
+	for k in pairs(t) do t[k] = nil end
+	if type(v) ~= "string" then return end
+	for line in v:gmatch("[^\r\n]+") do
+		local s = line:gsub("^%s+", ""):gsub("%s+$", "")
+		if s ~= "" then t[s] = true end
+	end
+end
+
+local function ensureDefaults()
+	if not (L.db and L.db.profile) then return end
+	local p = L.db.profile
+	
+	if p.hidePlayerNames == nil then p.hidePlayerNames = false end
+	if p.hideNonEssential == nil then p.hideNonEssential = true end 
+	if p.disableMysticScrolls == nil then p.disableMysticScrolls = false end
+    
+    p.featureOverrides = p.featureOverrides or {
+        realmType = "AUTO",
+    }
+    
+    p.viewer = p.viewer or {}
+    if p.viewer.rowFont == nil then p.viewer.rowFont = "Fonts\\ARIALN.TTF" end
+    if p.viewer.rowFontSize == nil then p.viewer.rowFontSize = 14 end
+    if p.viewer.rowHeight == nil then p.viewer.rowHeight = 28 end
+    if p.viewer.uiFont == nil then p.viewer.uiFont = "Fonts\\ARIALN.TTF" end
+    if p.viewer.uiFontSize == nil then p.viewer.uiFontSize = 13 end
+    if p.viewer.useWCAGColoring == nil then p.viewer.useWCAGColoring = true end
+    -- Inline vendor expansion is the only vendor view now (split pane retired).
+    p.viewer.inlineVendorView = true
+    if p.viewer.splitRatio == nil then p.viewer.splitRatio = 0.64 end
+    if p.viewer.asyncLoading == nil then p.viewer.asyncLoading = true end
+    if p.viewer.closeOnWorldMap == nil then p.viewer.closeOnWorldMap = false end
+    if p.perCharacterFavorites == nil then p.perCharacterFavorites = false end
+    if p.hideLootCollectorWelcome == nil then p.hideLootCollectorWelcome = false end
+    p.favorites = p.favorites or {}
+    if L.db.char then
+        L.db.char.favorites = L.db.char.favorites or {}
+    end
+    
+	p.sharing = p.sharing or {}
+	if p.sharing.enabled == nil then p.sharing.enabled = true end
+	if p.sharing.anonymous == nil then p.sharing.anonymous = false end
+	if p.sharing.delayed == nil then p.sharing.delayed = false end
+	if p.sharing.delaySeconds == nil then p.sharing.delaySeconds = 20 end
+    if p.sharing.allowShowRequests == nil then p.sharing.allowShowRequests = true end 
+	if p.sharing.publicChannelEnabled == nil then p.sharing.publicChannelEnabled = true end
+	if p.sharing.rejectPartySync == nil then p.sharing.rejectPartySync = false end
+	if p.sharing.rejectGuildSync == nil then p.sharing.rejectGuildSync = false end
+	if p.sharing.rejectWhisperSync == nil then p.sharing.rejectWhisperSync = false end
+	if p.sharing.blockList == nil then p.sharing.blockList = {} end
+	if p.sharing.whiteList == nil then p.sharing.whiteList = {} end
+	if p.sharing.seenVersions == nil then p.sharing.seenVersions = {} end
+	if p.sharing.blockedVersions == nil then p.sharing.blockedVersions = {} end
+	BlockOutdatedSeenVersions()
+	if p.sharing.autoPauseEnabled == nil then p.sharing.autoPauseEnabled = true end
+	if p.sharing.autoPauseThreshold == nil then p.sharing.autoPauseThreshold = 5000 end
+	if p.autoCache == nil then p.autoCache = true end
+
+	p.toasts = p.toasts or {}
+	if p.toasts.enabled == nil then p.toasts.enabled = true end	
+	if p.toasts.displayTime == nil then p.toasts.displayTime = 5.0 end
+	if p.toasts.tickerEnabled == nil then p.toasts.tickerEnabled = true end
+	if p.toasts.tickerSpeed == nil then p.toasts.tickerSpeed = 90 end
+	if p.toasts.tickerFontDelta == nil then p.toasts.tickerFontDelta = 3 end
+	if p.toasts.tickerOutline == nil then p.toasts.tickerOutline = false end
+	if p.toasts.whiteFrame == nil then p.toasts.whiteFrame = true end
+	if p.toasts.toastOnlyNew == nil then p.toasts.toastOnlyNew = true end
+	if p.toasts.toastMinQuality == nil then p.toasts.toastMinQuality = 2 end
+    
+    
+    p.mapFilters = p.mapFilters or {}
+    if p.mapFilters.showMinimap == nil then p.mapFilters.showMinimap = true end
+    if p.mapFilters.maxMinimapDistance == nil then p.mapFilters.maxMinimapDistance = 500 end 
+	if p.mapFilters.disableProximityList == nil then p.mapFilters.disableProximityList = true end 
+	if p.minimapButtonHidden == nil then p.minimapButtonHidden = false end
+	if p.mapFilters.pinSize == nil then p.mapFilters.pinSize = 15 end
+	if p.mapFilters.minimapPinSize == nil then p.mapFilters.minimapPinSize = 15 end
+	if p.mapFilters.showZoneSummaries == nil then p.mapFilters.showZoneSummaries = false end
+	if p.mapFilters.disableFadeEffect == nil then p.mapFilters.disableFadeEffect = true end
+	if p.mapFilters.enableChatLinkIntegration == nil then p.mapFilters.enableChatLinkIntegration = true end
+	if p.mapFilters.filterButtonLocked == nil then p.mapFilters.filterButtonLocked = true end
+	if p.mapFilters.filterButtonDragged == nil then p.mapFilters.filterButtonDragged = false end
+	
+    
+    if not L.db.char then L.db.char = {} end
+    local c = L.db.char
+    
+    
+    if not c.migratedFiltersV8 then
+        c.mapFilters = {
+            hideAll = p.mapFilters.hideAll or false,
+            hideFaded = p.mapFilters.hideFaded or false,
+            hideStale = p.mapFilters.hideStale or false,
+            hideLooted = p.mapFilters.hideLooted or false,
+            hideUnconfirmed = p.mapFilters.hideUnconfirmed or false,
+            hideUncached = p.mapFilters.hideUncached or false,
+            hideLearnedTransmog = p.mapFilters.hideLearnedTransmog or false,
+            hideCollectedME = p.mapFilters.hideCollectedME or false,
+            hideBags = p.mapFilters.hideBags or false,
+            showMysticScrolls = p.mapFilters.showMysticScrolls ~= false,
+            showWorldforged = p.mapFilters.showWorldforged ~= false,
+            showVendors = p.mapFilters.showVendors ~= false,
+            autoTrackNearest = p.mapFilters.autoTrackNearest or false,
+            minRarity = p.mapFilters.minRarity or 0,
+            usableByClasses = {},
+            allowedEquipLoc = {},
+        }
+        
+        if p.mapFilters.usableByClasses then
+            for k, v in pairs(p.mapFilters.usableByClasses) do c.mapFilters.usableByClasses[k] = v end
+        end
+        if p.mapFilters.allowedEquipLoc then
+            for k, v in pairs(p.mapFilters.allowedEquipLoc) do c.mapFilters.allowedEquipLoc[k] = v end
+        end
+        
+        c.paused = p.paused or false
+        c.autoPauseInBG = p.autoPauseInBG or true 
+        c.autoPauseInRaidInstance = p.autoPauseInRaidInstance or true 
+        c.autoPauseInRaidGroup = p.autoPauseInRaidGroup or true
+        
+        c.migratedFiltersV8 = true
+    end
+    
+    c.mapFilters = c.mapFilters or {}
+    if c.mapFilters.hideAll == nil then c.mapFilters.hideAll = false end
+    if c.mapFilters.hideFaded == nil then c.mapFilters.hideFaded = false end
+    if c.mapFilters.hideStale == nil then c.mapFilters.hideStale = false end
+    if c.mapFilters.hideLooted == nil then c.mapFilters.hideLooted = true end
+    if c.mapFilters.hideUnconfirmed == nil then c.mapFilters.hideUnconfirmed = false end
+    if c.mapFilters.hideUncached == nil then c.mapFilters.hideUncached = false end
+    if c.mapFilters.hideLearnedTransmog == nil then c.mapFilters.hideLearnedTransmog = false end
+    if c.mapFilters.hideCollectedME == nil then c.mapFilters.hideCollectedME = false end
+	if c.mapFilters.hideBags == nil then c.mapFilters.hideBags = false end
+    if c.mapFilters.showMysticScrolls == nil then c.mapFilters.showMysticScrolls = true end
+    if c.mapFilters.showWorldforged == nil then c.mapFilters.showWorldforged = true end
+    if c.mapFilters.showVendors == nil then c.mapFilters.showVendors = true end
+    if c.mapFilters.autoTrackNearest == nil then c.mapFilters.autoTrackNearest = false end
+    if c.mapFilters.minRarity == nil then c.mapFilters.minRarity = 0 end
+    if c.mapFilters.usableByClasses == nil then c.mapFilters.usableByClasses = {} end
+    if c.mapFilters.allowedEquipLoc == nil then c.mapFilters.allowedEquipLoc = {} end
+    
+	if c.paused == nil then c.paused = false end
+	if c.autoPauseInBG == nil then c.autoPauseInBG = true end 
+	if c.autoPauseInRaidInstance == nil then c.autoPauseInRaidInstance = true end 
+	if c.autoPauseInRaidGroup == nil then c.autoPauseInRaidGroup = true end
+end
+
+StaticPopupDialogs["LOOTCOLLECTOR_REALM_OVERRIDE_RELOAD"] = {
+    text = "You have changed the Active Realm Mode.\n\nA UI reload is required to fully apply these changes to the interface.\n\nWould you like to reload now?",
+    button1 = "Reload UI",
+    button2 = "Later",
+    OnAccept = function()
+        ReloadUI()
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+}
+
+StaticPopupDialogs["LOOTCOLLECTOR_COA_OVERRIDE_WARNING"] = {
+	text = "|cffff0000WARNING:|r You are manually setting the realm type to 'CoA'.\n\nThis will permanently DELETE all Mystic Scrolls, Mystic Scroll Vendors, Librams, and Idols from your database.\n\nAre you sure?",
+	button1 = "Yes, Proceed",
+	button2 = "Cancel",
+	OnAccept = function()
+		L.db.profile.featureOverrides.realmType = "COA"
+		local Constants = L:GetModule("Constants", true)
+		if Constants and Constants.DetermineRealmCapabilities then
+			Constants:DetermineRealmCapabilities()
+			Constants:UpdateAllowedTypes()
+		end
+		
+		local Core = L:GetModule("Core", true)
+		if Core and Core.RunUnifiedDatabasePass then
+            
+			local stats = Core:RunUnifiedDatabasePass()
+            local count = (stats and stats.coa) or 0
+			print(string.format("|cff00ff00LootCollector:|r Realm mode manually set to COA. Purged %d incompatible entries.", count))
+		end
+        
+		
+		StaticPopup_Show("LOOTCOLLECTOR_REALM_OVERRIDE_RELOAD")
+	end,
+	timeout = 0,
+	whileDead = 1,
+	hideOnEscape = 1,
+	showAlert = true,
+}
+
+local function buildOptions()
+	ensureDefaults()
+	local opts = {
+		type = "group",
+		name = "LootCollector",
+		args = {
+			visibility = {
+				type = "group",
+				name = "Map & Minimap",
+				inline = false,
+				order = 10,
+				args = {
+					mapNote = {
+						type = "description",
+						name = "Many day-to-day pin filters also live on the World Map filter menu. Use Discoveries (/lcv) with Filter Map for text search and richer filters.\n\nShift-click a discovery or map pin while chat is open to insert the item link.",
+						order = 0.01,
+					},
+					hibernationHeader = {
+						type = "header",
+						name = "Hibernation",
+						order = 0.05,
+					},
+					pauseAddon = {
+						type = "toggle",
+						name = "|cffff0000Pause Addon (Hibernation)|r",
+						order = 0.1,
+						desc = "|cffff0000WARNING:|r Pausing the addon completely stops all background tracking. \n\nYour map icons will vanish, you will not receive network updates, and |cffff7f00any items you loot while paused will NOT be saved to your database.|r",
+						get = function() return L.db.char.paused end,
+						set = function(_, v) L:TogglePause() end,
+					},
+					autoPauseInBG = {
+						type = "toggle",
+						name = "Auto-Hibernate in PvP Instances",
+						order = 0.2,
+						desc = "Automatically puts the addon into Hibernation Mode while inside Battlegrounds or Arenas to save CPU and network bandwidth.",
+						get = function() return L.db.char.autoPauseInBG end,
+						set = function(_, v) 
+						    L.db.char.autoPauseInBG = v 
+						    L:EvaluateAutoPause()
+						end,
+					},
+					autoPauseInRaidInstance = {
+						type = "toggle",
+						name = "Auto-Hibernate in Raid Instances",
+						order = 0.3,
+						desc = "Automatically puts the addon into Hibernation Mode while inside Raid instances (e.g. Naxxramas).",
+						get = function() return L.db.char.autoPauseInRaidInstance end,
+						set = function(_, v) 
+						    L.db.char.autoPauseInRaidInstance = v 
+						    L:EvaluateAutoPause()
+						end,
+					},
+					autoPauseInRaidGroup = {
+						type = "toggle",
+						name = "Auto-Hibernate in Raid Groups",
+						order = 0.4,
+						desc = "Automatically puts the addon into Hibernation Mode whenever you are in a Raid Group, regardless of your location. (Warning: You will miss all open-world discoveries while grouped).",
+						get = function() return L.db.char.autoPauseInRaidGroup end,
+						set = function(_, v) 
+						    L.db.char.autoPauseInRaidGroup = v 
+						    L:EvaluateAutoPause()
+						end,
+					},
+					mapPinsHeader = {
+						type = "header",
+						name = "Map Pins",
+						order = 0.9,
+					},
+					hideAll = {
+						type = "toggle",
+						name = "Hide All",
+						order = 1,
+						desc = "Hide every LootCollector pin from the world map and minimap. Tracking and sharing continue unless the addon is hibernating.",
+						get = function() return L.db.char.mapFilters.hideAll end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideAll = v
+							refreshUI()
+						end,
+					},
+					hideFaded = {
+						type = "toggle",
+						name = "Hide Faded",
+						order = 2,
+						desc = "Hide discoveries that are fading out (rarely reinforced or recently looted by others).",
+						get = function() return L.db.char.mapFilters.hideFaded end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideFaded = v
+							refreshUI()
+						end,
+					},
+					hideStale = {
+						type = "toggle",
+						name = "Hide Stale",
+						order = 3,
+						desc = "Hide discoveries that have gone stale from lack of recent confirmation.",
+						get = function() return L.db.char.mapFilters.hideStale end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideStale = v
+							refreshUI()
+						end,
+					},
+					hideLooted = {
+						type = "toggle",
+						name = "Hide Looted",
+						order = 4,
+						desc = "Hide discoveries already looted by this character.",
+						get = function() return L.db.char.mapFilters.hideLooted end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideLooted = v
+							refreshUI()
+						end,
+					},
+					hideLearnedTransmog = {
+						type = "toggle",
+						name = "Hide Collected Appearances",
+						order = 4.1,
+						desc = "Hide discoveries for items with appearances you have already collected.",
+						get = function() return L.db.char.mapFilters.hideLearnedTransmog end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideLearnedTransmog = v
+							refreshUI()
+						end,
+					},
+					hideCollectedME = {
+						type = "toggle",
+						name = "Hide Collected Mystic Enchants",
+						order = 4.2,
+						desc = "Hide Mystic Scroll discoveries for enchants you have already collected.",
+						hidden = IsMysticScrollsHidden,
+						get = function() return L.db.char.mapFilters.hideCollectedME end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideCollectedME = v
+							refreshUI()
+						end,
+					},
+					hideBags = {
+						type = "toggle",
+						name = "Hide Bags (map & list)",
+						order = 4.25,
+						desc = "Hide discoveries for bag items (containers). Useful if you already have large bags.",
+						get = function() return L.db.char.mapFilters.hideBags end,
+						set = function(_, v)
+							L.db.char.mapFilters.hideBags = v
+							refreshUI()
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer then
+								if Viewer.InvalidateFilterCache then Viewer:InvalidateFilterCache() end
+								if Viewer.window and Viewer.window:IsShown() and Viewer.RefreshData then Viewer:RefreshData() end
+							end
+						end,
+					},
+					disableFadeEffect = {
+						type = "toggle",
+						name = "Disable Fade Effect",
+						order = 4.3,
+						desc = "Show all map pins at full opacity, even if their discovery is fading or stale.",
+						get = function() return L.db.profile.mapFilters.disableFadeEffect end,
+						set = function(_, v)
+							L.db.profile.mapFilters.disableFadeEffect = v
+							refreshUI()
+						end,
+					},
+					enableChatLinkIntegration = {
+						type = "toggle",
+						name = "Alt+Right-Click Chat Links → Map",
+						order = 4.38,
+						desc = "Allows you to Alt + Right-Click any item link in the chat box to instantly search your database and show its location on the World Map if found.",
+						get = function() return L.db.profile.mapFilters.enableChatLinkIntegration ~= false end,
+						set = function(_, v)
+							L.db.profile.mapFilters.enableChatLinkIntegration = v
+						end,
+					},
+					disableProximityList = {
+						type = "toggle",
+						name = "Disable 'Nearby Discoveries'",
+						order = 4.5,
+						desc = "Completely disables the 'Nearby Discoveries' list from popping up when hovering over clustered map pins. (You can also hold CTRL to temporarily suppress it).",
+						get = function() return L.db.profile.mapFilters.disableProximityList end,
+						set = function(_, v)
+							L.db.profile.mapFilters.disableProximityList = v
+							if v then
+								local PL = L:GetModule("ProximityList", true)
+								if PL and PL.Hide then PL:Hide() end
+							end
+						end,
+					},
+					pinSizeSlider = {
+						type = "range",
+						name = "Map Icon Size",
+						order = 4.6,
+						desc = "Size of discovery pins on the world map.",
+						min = 8,
+						max = 32,
+						step = 1,
+						get = function() return L.db.profile.mapFilters.pinSize end,
+						set = function(_, v)
+							L.db.profile.mapFilters.pinSize = v
+							refreshUI()
+						end,
+					},
+					autoTrackNearest = {
+						type = "toggle",
+						name = "Auto-track Nearest Unlooted",
+						order = 4.7,
+						desc = "Automatically enables the arrow to point to the nearest unlooted discovery that matches your filters.",
+						get = function() return L.db.char.mapFilters.autoTrackNearest end,
+						set = function(_, v)
+							L.db.char.mapFilters.autoTrackNearest = v
+							local Arrow = L:GetModule("Arrow", true)
+							if Arrow then
+								if v then
+									Arrow:Show()
+								else
+									Arrow:Hide()
+								end
+							end
+						end,
+					},
+					minimapHeader = {
+						type = "header",
+						name = "Minimap",
+						order = 5,
+					},
+					showMinimap = {
+						type = "toggle",
+						name = "Show on Minimap",
+						order = 5.01,
+						desc = "Show discovery pins on the minimap.",
+						get = function() return L.db.profile.mapFilters.showMinimap end,
+						set = function(_,v) L.db.profile.mapFilters.showMinimap = v; refreshUI() end,
+					},
+					minimapPinSize = {
+						type = "range",
+						name = "Minimap Icon Size",
+						order = 5.02,
+						desc = "Size of discovery pins on the minimap.",
+						min = 6, max = 24, step = 1,
+						disabled = function() return not L.db.profile.mapFilters.showMinimap end,
+						get = function() return L.db.profile.mapFilters.minimapPinSize or 10 end,
+						set = function(_, v)
+							L.db.profile.mapFilters.minimapPinSize = v
+							
+							local Map = L:GetModule("Map", true)
+							if Map and Map.UpdateMinimapPinSizes then
+								Map:UpdateMinimapPinSizes()
+							end
+						end,
+					},
+					maxMinimapDistance = {
+						type = "range",
+						name = "Max Minimap Distance (yards)",
+						order = 5.1,
+						desc = "Only show icons on the minimap if they are within this many yards of you.",
+						min = 100, max = 5000, step = 10,
+						disabled = function() return not L.db.profile.mapFilters.showMinimap end,
+						get = function() return L.db.profile.mapFilters.maxMinimapDistance end,
+						set = function(_, v) L.db.profile.mapFilters.maxMinimapDistance = v; refreshUI() end,
+					},
+					showMinimapButton = {
+						type = "toggle",
+						name = "Show Minimap Button",
+						order = 5.2,
+						desc = "Toggle the visibility of the LootCollector minimap button.",
+						get = function() return not L.db.profile.minimapButtonHidden end,
+						set = function(_, v)
+							L.db.profile.minimapButtonHidden = not v
+							local MMBtn = L:GetModule("MinimapButton", true)
+							if MMBtn then
+								if v then 
+									MMBtn:Show() 
+								else 
+									MMBtn:Hide() 
+								end
+							end
+						end,
+					},
+				},
+			},
+
+			toasts = {
+				type = "group",
+				name = "Toasts",
+				inline = false,
+				order = 12,
+				args = {
+					whenToToastHeader = {
+						type = "header",
+						name = "When to Toast",
+						order = 1,
+					},
+					toastsEnabled = {
+						type = "toggle",
+						name = "Enable Toasts",
+						order = 2,
+						desc = "Show popup toast notifications when new discoveries arrive (from sharing or your own finds).",
+						get = function()
+							return L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled
+						end,
+						set = function(_, v)
+							if not L.db or not L.db.profile then return end
+							L.db.profile.toasts = L.db.profile.toasts or {}
+							L.db.profile.toasts.enabled = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplySettings then
+								Toast:ApplySettings()
+							end
+						end,
+					},
+					toastOnlyNew = {
+						type = "toggle",
+						name = "Only Toast NEW Discoveries",
+						order = 3,
+						desc = "If enabled, only brand new pins will trigger a popup. Updates/Reinforcements to existing pins will be silent.",
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled)
+						end,
+						get = function()
+							if L.db.profile.toasts.toastOnlyNew == nil then return true end 
+							return L.db.profile.toasts.toastOnlyNew
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.toastOnlyNew = v
+						end,
+					},
+					toastMinQuality = {
+						type = "select",
+						name = "Minimum Toast Quality",
+						order = 4,
+						desc = "Only show toasts for items of this quality or higher.",
+						values = {
+							[0] = "|cff9d9d9dPoor|r",
+							[1] = "|cffffffffCommon|r",
+							[2] = "|cff1eff00Uncommon|r",
+							[3] = "|cff0070ddRare|r",
+							[4] = "|cffa335eeEpic|r",
+							[5] = "|cffff8000Legendary|r"
+						},
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.toastMinQuality or 2 
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.toastMinQuality = v
+						end,
+					},
+					toastDisplayTime = {
+						type = "range",
+						name = "Toast Display Time",
+						order = 5,
+						desc = "How many seconds each toast stays on screen before fading out.",
+						min = 2.0,
+						max = 10.0,
+						step = 0.5,
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.displayTime
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.displayTime = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplySettings then
+								Toast:ApplySettings()
+							end
+						end,
+					},
+					whiteFrame = {
+						type = "toggle",
+						name = "Bright Frame Border",
+						order = 6,
+						desc = "Use a bright white border for toast frames instead of dim gray.",
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.whiteFrame
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.whiteFrame = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplyFrameStyle then
+								Toast:ApplyFrameStyle()
+							end
+						end,
+					},
+					resetToastPosition = {
+						type = "execute",
+						name = "Reset Toast Position",
+						order = 7,
+						desc = "Reset toast notifications to their default on-screen position.",
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled)
+						end,
+						func = function()
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ResetPosition then
+								Toast:ResetPosition()
+							end
+						end,
+					},
+					tickerHeader = {
+						type = "header",
+						name = "Special Ticker",
+						order = 10,
+					},
+					tickerEnabled = {
+						type = "toggle",
+						name = "Enable Special Ticker",
+						order = 11,
+						desc = "Use a scrolling ticker instead of a static popup when many discoveries arrive in quick succession.",
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.tickerEnabled
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.tickerEnabled = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplySettings then
+								Toast:ApplySettings()
+							end
+						end,
+					},
+					tickerSpeed = {
+						type = "range",
+						name = "Ticker Scroll Speed",
+						order = 12,
+						desc = "How fast the special ticker text scrolls across the screen. Higher is faster.",
+						min = 30,
+						max = 150,
+						step = 5,
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled and L.db.profile.toasts.tickerEnabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.tickerSpeed
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.tickerSpeed = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplySettings then
+								Toast:ApplySettings()
+							end
+						end,
+					},
+					tickerFontDelta = {
+						type = "range",
+						name = "Ticker Font Size Adjustment",
+						order = 13,
+						desc = "Adjust the ticker font size relative to the default (negative shrinks, positive enlarges).",
+						min = -2,
+						max = 8,
+						step = 1,
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled and L.db.profile.toasts.tickerEnabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.tickerFontDelta
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.tickerFontDelta = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplySettings then
+								Toast:ApplySettings()
+							end
+						end,
+					},
+					tickerOutline = {
+						type = "toggle",
+						name = "Ticker Font Outline",
+						order = 14,
+						desc = "Add an outline to ticker text for better readability against busy backgrounds.",
+						disabled = function()
+							return not (L.db and L.db.profile and L.db.profile.toasts and L.db.profile.toasts.enabled and L.db.profile.toasts.tickerEnabled)
+						end,
+						get = function()
+							return L.db.profile.toasts.tickerOutline
+						end,
+						set = function(_, v)
+							L.db.profile.toasts.tickerOutline = v
+							local Toast = L:GetModule("Toast", true)
+							if Toast and Toast.ApplySettings then
+								Toast:ApplySettings()
+							end
+						end,
+					},
+				},
+			},
+
+			viewerOptions = {
+				type = "group",
+				name = "Discoveries Window",
+				inline = false,
+				order = 15,
+				args = {
+					viewerDesc = {
+						type = "description",
+						name = "Customize fonts, spacing, and behavior of the Discoveries window (minimap button or /lcv).",
+						order = 1,
+					},
+					perCharacterFavorites = {
+						type = "toggle",
+						name = "Per-character Favorites",
+						desc = "When enabled, each character has its own Favorites list. When disabled (default), Favorites are shared across characters on this profile. Turning it on copies your shared list to this character if their list is empty; turning it off returns to the shared list without deleting either.",
+						order = 1.5,
+						get = function() return L.db.profile.perCharacterFavorites end,
+						set = function(_, v)
+							if L.SetPerCharacterFavorites then
+								L:SetPerCharacterFavorites(v)
+							else
+								L.db.profile.perCharacterFavorites = v and true or false
+							end
+						end,
+					},
+					enhancedWFTooltip = {
+						type = "toggle",
+						name = "Enhanced WF Tooltip",
+						desc = "When enabled, Worldforged item tooltips show Dung–T3 upgrade lines (same option as Map → Show and /lcwf).",
+						order = 1.6,
+						get = function()
+							return L.db.profile.enhancedWFTooltip and true or false
+						end,
+						set = function(_, v)
+							L.db.profile.enhancedWFTooltip = v and true or false
+							local Tooltip = L:GetModule("Tooltip", true)
+							if Tooltip and Tooltip.ApplySetting then
+								Tooltip:ApplySetting()
+							end
+						end,
+					},
+					closeOnWorldMap = {
+						type = "toggle",
+						name = "Close Discoveries when map opens",
+						desc = "When enabled, opening the world map (M) closes the Discoveries window. When disabled (default), Discoveries stays open.",
+						order = 1.7,
+						get = function()
+							return L.db.profile.viewer.closeOnWorldMap and true or false
+						end,
+						set = function(_, v)
+							L.db.profile.viewer.closeOnWorldMap = v and true or false
+						end,
+					},
+					rowFont = {
+						type = "select",
+						name = "List Font (Rows)",
+						order = 2,
+						desc = "Font used for discovery rows in the list.",
+						values = {
+							["Fonts\\ARIALN.TTF"] = "Arial Narrow",
+							["Fonts\\FRIZQT__.TTF"] = "Friz Quadrata",
+							["Fonts\\2002.TTF"] = "2022",
+							["Fonts\\MORPHEUS.ttf"] = "Morpheus",
+							["Fonts\\NIM_____.ttf"] = "Nimrod MT"
+						},
+						get = function() return L.db.profile.viewer.rowFont end,
+						set = function(_, v) 
+							L.db.profile.viewer.rowFont = v
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer and Viewer.ApplySettings then Viewer:ApplySettings() end
+						end,
+					},
+					rowFontSize = {
+						type = "range",
+						name = "List Font Size",
+						order = 3,
+						desc = "Font size for discovery list rows.",
+						min = 10, max = 22, step = 1,
+						get = function() return L.db.profile.viewer.rowFontSize end,
+						set = function(_, v) 
+							L.db.profile.viewer.rowFontSize = v
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer and Viewer.ApplySettings then Viewer:ApplySettings() end
+						end,
+					},
+					rowHeight = {
+						type = "range",
+						name = "Row Height",
+						order = 4,
+						desc = "Vertical spacing of each discovery row.",
+						min = 18, max = 48, step = 1,
+						get = function() return L.db.profile.viewer.rowHeight end,
+						set = function(_, v) 
+							L.db.profile.viewer.rowHeight = v
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer and Viewer.ApplySettings then Viewer:ApplySettings() end
+						end,
+					},
+					uiFont = {
+						type = "select",
+						name = "UI Font (Headers & Buttons)",
+						order = 5,
+						desc = "Font used for headers, buttons, and other UI chrome in the Discoveries window.",
+						values = {
+							["Fonts\\ARIALN.TTF"] = "Arial Narrow",
+							["Fonts\\FRIZQT__.TTF"] = "Friz Quadrata",
+							["Fonts\\2002.TTF"] = "2022",
+							["Fonts\\MORPHEUS.ttf"] = "Morpheus",
+							["Fonts\\NIM_____.ttf"] = "Nimrod MT"
+						},
+						get = function() return L.db.profile.viewer.uiFont end,
+						set = function(_, v) 
+							L.db.profile.viewer.uiFont = v
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer and Viewer.ApplySettings then Viewer:ApplySettings() end
+						end,
+					},
+					uiFontSize = {
+						type = "range",
+						name = "UI Font Size",
+						order = 6,
+						desc = "Font size for headers, buttons, and other UI chrome.",
+						min = 10, max = 22, step = 1,
+						get = function() return L.db.profile.viewer.uiFontSize end,
+						set = function(_, v) 
+							L.db.profile.viewer.uiFontSize = v
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer and Viewer.ApplySettings then Viewer:ApplySettings() end
+						end,
+					},
+					useWCAGColoring = {
+						type = "toggle",
+						name = "Higher-Contrast Item Colors",
+						desc = "Adjusts Poor, Rare, and Epic item colors slightly to meet WCAG AA contrast compliance (4.5:1 ratio) on dark backgrounds.",
+						order = 7,
+						get = function() return L.db.profile.viewer.useWCAGColoring end,
+						set = function(_, v) 
+							L.db.profile.viewer.useWCAGColoring = v
+							local Viewer = L:GetModule("Viewer", true)
+							if Viewer and Viewer.ApplySettings then Viewer:ApplySettings() end
+						end,
+					},
+					asyncLoading = {
+						type = "toggle",
+						name = "Smooth Viewer Loading",
+						desc = function()
+							local baseDesc = "Loads the Discoveries Viewer smoothly in the background over a few seconds to completely eliminate screen freezing, rather than locking the game for a split second."
+							
+							if not L.db.profile.viewer.asyncLoading and L._profilerStats then
+								local stats = L._profilerStats["Viewer:UpdateAllDiscoveries"]
+								if stats and stats.max and stats.max >= 100.0 then
+									local timeSaved = math.floor(stats.max)
+									return baseDesc .. string.format("\n\n|cffff7f00If you enable this feature it will eliminate a %dms screen freeze on your machine.|r", timeSaved)
+								end
+							end
+							return baseDesc
+						end,
+						order = 9,
+						get = function() return L.db.profile.viewer.asyncLoading end,
+						set = function(_, v) L.db.profile.viewer.asyncLoading = v end,
+					},
+				},
+			},
+
+			sharing = {
+				type = "group",
+				name = "Behavior & Sharing",
+				inline = false,
+				order = 20,
+				args = {
+					generalHeader = {
+						type = "header",
+						name = "General",
+						order = 0.1,
+					},
+					showWelcomeTips = {
+						type = "toggle",
+						name = "Show welcome tips on login",
+						order = 0.2,
+						desc = "Show the LootCollector quick-start popup shortly after login. Uncheck Don't show this again on the popup to keep seeing it, or turn this back on here anytime.",
+						get = function()
+							return not (L.db and L.db.profile and L.db.profile.hideLootCollectorWelcome)
+						end,
+						set = function(_, v)
+							if not L.db or not L.db.profile then return end
+							L.db.profile.hideLootCollectorWelcome = not v
+							if v and L.MaybeShowWelcomeTips then
+								L:MaybeShowWelcomeTips()
+							end
+						end,
+					},
+					autoCache = {
+						type = "toggle",
+						name = "Automatically Cache Discoveries",
+						order = 0.3,
+						desc = "Background-fetch item names, icons, and tooltips for discoveries you have not seen yet so they display correctly in the map, viewer, and toasts.",
+						get = function()
+							return L.db.profile.autoCache
+						end,
+						set = function(_, v)
+							L.db.profile.autoCache = v
+							
+							
+							local queueSize = (L.db and L.db.global and L.db.global.cacheQueue and #L.db.global.cacheQueue) or 0
+							
+							
+							if v then
+								if queueSize > 0 then
+									print(string.format("|cff00ff00LootCollector|r Automatic item caching is now |cff00ff00ENABLED|r. %d items in queue.", queueSize))
+								else
+									print("|cff00ff00LootCollector|r Automatic item caching is now |cff00ff00ENABLED|r. Queue is empty.")
+								end
+							else
+								if queueSize > 0 then
+									print(string.format("|cffff7f00LootCollector|r Automatic item caching is now |cffff0000DISABLED|r. %d items remain in queue.", queueSize))
+								else
+									print("|cffff7f00LootCollector|r Automatic item caching is now |cffff0000DISABLED|r.")
+								end
+							end
+							
+							
+							local Core = L:GetModule("Core", true)
+							if Core then
+								if v then
+									
+									if Core.ScanDatabaseForUncachedItems then
+										Core:ScanDatabaseForUncachedItems()
+									end
+									if Core.EnsureCachePump then
+										Core:EnsureCachePump()
+									end
+								else
+									
+									
+									if queueSize > 0 then
+										print("|cffffff00LootCollector|r Item cache processing will stop after current item.")
+									end
+								end
+							end
+						end,
+					},
+					hideNonEssential = {
+						type = "toggle",
+						name = "Hide Non-Essential Messages",
+						order = 0.4,
+						desc = "Hides routine maintenance and background caching chat messages.",
+						get = function()
+							return L.db.profile.hideNonEssential
+						end,
+						set = function(_, v)
+							L.db.profile.hideNonEssential = v
+						end,
+					},
+					hidePlayerNames = {
+						type = "toggle",
+						name = "Hide Player Names",
+						order = 0.5,
+						desc = "Replaces finder names in toasts and map/item tooltips with a generic message.",
+						get = function()
+							return L.db.profile.hidePlayerNames
+						end,
+						set = function(_, v)
+							L.db.profile.hidePlayerNames = v
+							refreshUI()
+						end,
+					},
+					sharingHeader = {
+						type = "header",
+						name = "Sharing Controls",
+						order = 9,
+					},
+					sharingEnabled = {
+						type = "toggle",
+						name = "Enable Sharing",
+						order = 10,
+						desc = "Broadcast discoveries to party/raid/guild and the public channel.|n|cFFFFA500Warning: this feature can cause stuttering on some machines even with high FPS.|r",
+						get = function()
+							return L.db and L.db.profile and L.db.profile.sharing and L.db.profile.sharing.enabled
+						end,
+						set = function(_, v)
+							if not L.db or not L.db.profile then return end
+							L.db.profile.sharing = L.db.profile.sharing or {}
+							L.db.profile.sharing.enabled = v
+
+							local Comm = L:GetModule("Comm", true)
+
+							if v then
+								
+								print("|cff00ff00LootCollector:|r Sharing enabled.")
+								if Comm then
+									if L.channelReady then
+										if Comm.EnsureChannelJoined then Comm:EnsureChannelJoined() end
+									else
+										print("|cffff7f00LootCollector:|r Sharing will be fully enabled after the initial login delay.")
+									end
+								end
+							else
+								
+								if Comm and Comm.LeavePublicChannel then
+									Comm:LeavePublicChannel()
+								end
+
+								local clearedBroadcasts = 0
+								local Core = L:GetModule("Core", true)
+								if Core and Core.pendingBroadcasts then
+									for _ in pairs(Core.pendingBroadcasts) do clearedBroadcasts = clearedBroadcasts + 1 end
+									wipe(Core.pendingBroadcasts)
+								end
+
+								if Comm and Comm._rateLimitQueue then
+									clearedBroadcasts = clearedBroadcasts + (Comm.GetRateLimitQueueSize and Comm:GetRateLimitQueueSize() or 0)
+									wipe(Comm._rateLimitQueue)
+									Comm._rateLimitQueue.__h = 1
+									Comm._rateLimitQueue.__n = 0
+								end
+
+								if Comm and Comm._outgoingSyncQueue then
+									clearedBroadcasts = clearedBroadcasts + (Comm.GetOutgoingQueueSize and Comm:GetOutgoingQueueSize() or 0)
+									wipe(Comm._outgoingSyncQueue)
+									Comm._outgoingSyncQueue.__h = 1
+									Comm._outgoingSyncQueue.__n = 0
+								end
+
+								local clearedToasts = 0
+								local Toast = L:GetModule("Toast", true)
+								if Toast and Toast.ClearQueue then
+									clearedToasts = Toast:ClearQueue()
+								end
+
+								print(string.format("|cffff7f00LootCollector:|r Sharing disabled. Cleared %d pending broadcasts and %d pending notifications.", clearedBroadcasts, clearedToasts))
+							end
+						end,
+					},
+					publicChannelEnabled = {
+						type = "toggle",
+						name = "Enable Public Channel Sync",
+						order = 10.5,
+						desc = "Join the global custom channel and sync discoveries with other players on the server.|nThe Auto-Pause Shield is on by default at 5000 msgs/min and will leave the channel briefly if traffic spikes.|n|cffff0000WARNING: On highly populated realms (e.g. CoA), this channel can still cause stuttering if you raise or disable the shield.|r",
+						disabled = function()
+							return not L.db.profile.sharing.enabled
+						end,
+						get = function()
+							return L.db and L.db.profile and L.db.profile.sharing and L.db.profile.sharing.publicChannelEnabled
+						end,
+						set = function(_, v)
+							if not L.db or not L.db.profile then return end
+							L.db.profile.sharing = L.db.profile.sharing or {}
+							L.db.profile.sharing.publicChannelEnabled = v
+
+							local Comm = L:GetModule("Comm", true)
+							if Comm then
+								if v then
+									if L.channelReady then
+										if Comm.EnsureChannelJoined then Comm:EnsureChannelJoined() end
+									else
+										print("|cffff7f00LootCollector:|r Public channel sync will be enabled after the initial login delay.")
+									end
+								else
+									if Comm.LeavePublicChannel then Comm:LeavePublicChannel() end
+									Comm._publicChannelAutoPaused = nil
+									Comm._autoPauseRejoinTime = nil
+								end
+							end
+						end,
+					},
+					autoPauseEnabled = {
+						type = "toggle",
+						name = "Enable Auto-Pause Shield",
+						order = 10.55,
+						desc = "Automatically leave the public channel if incoming traffic exceeds the set threshold to protect client performance.",
+						disabled = function()
+							return not L.db.profile.sharing.enabled or not L.db.profile.sharing.publicChannelEnabled
+						end,
+						get = function()
+							return L.db.profile.sharing.autoPauseEnabled
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.autoPauseEnabled = v
+							local Comm = L:GetModule("Comm", true)
+							if Comm and not v then
+								Comm._publicChannelAutoPaused = nil
+								Comm._autoPauseRejoinTime = nil
+								if Comm:IsChannelHealthy() == false and L.db.profile.sharing.publicChannelEnabled and L.db.profile.sharing.enabled then
+									Comm:EnsureChannelJoined()
+								end
+							end
+						end,
+					},
+					autoPauseThreshold = {
+						type = "range",
+						name = "Auto-Pause Threshold (MPM)",
+						order = 10.6,
+						desc = "The number of messages per minute (MPM) required to trigger the performance protection shield.",
+						min = 1000,
+						max = 15000,
+						step = 500,
+						disabled = function()
+							return not L.db.profile.sharing.enabled or not L.db.profile.sharing.publicChannelEnabled or not L.db.profile.sharing.autoPauseEnabled
+						end,
+						get = function()
+							return L.db.profile.sharing.autoPauseThreshold or 5000
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.autoPauseThreshold = v
+						end,
+					},
+					publicChannelStatus = {
+						type = "description",
+						name = function()
+							local Comm = L:GetModule("Comm", true)
+							if not Comm or not Comm.GetPublicChannelCongestionStatus then
+								return "Public Channel Sync is currently inactive."
+							end
+							local st = Comm:GetPublicChannelCongestionStatus()
+							if not st.active then
+								return "Public Channel Sync is currently inactive."
+							end
+							local intervalSec = Comm._cachedSharingInterval or Comm:GetCurrentSharingInterval() or 1200
+							local queueSize = Comm:GetOutgoingQueueSize() or 0
+
+							if st.suspended then
+								return string.format(
+									"|cff888888Status:|r |cffff0000Suspended (High Traffic)|r\n" ..
+									"|cff888888Traffic Rate:|r |cffffffff%d|r msgs/min\n" ..
+									"|cff888888Resuming in:|r |cffffffff%d|r seconds",
+									st.mpm, st.remaining or 0
+								)
+							end
+
+							return string.format(
+								"|cff888888Status:|r |cff%s%s|r (|cffffffff%d|r msgs/min)\n" ..
+								"|cff888888Sharing Delay:|r |cffffffff%.1f|r minutes\n" ..
+								"|cff888888Pending Queue:|r |cffffffff%d|r/10 items",
+								st.colorHex, st.label, st.mpm, intervalSec / 60, queueSize
+							)
+						end,
+						order = 10.7,
+						fontSize = "medium",
+					},
+					namelessSharing = {
+						type = "toggle",
+						name = "Share Anonymously",
+						order = 11,
+						desc = "When sharing discoveries, omit your character name so others see an anonymous finder instead of you.",
+						disabled = function()
+							return not L.db.profile.sharing.enabled
+						end,
+						get = function()
+							return L.db and L.db.profile and L.db.profile.sharing and L.db.profile.sharing.anonymous
+						end,
+						set = function(_, v)
+							if not L.db or not L.db.profile then return end
+							L.db.profile.sharing = L.db.profile.sharing or {}
+							L.db.profile.sharing.anonymous = (not not v)
+						end,
+					},
+					delayedSharing = {
+						type = "toggle",
+						name = "Delayed Sharing",
+						order = 12,
+						desc = "Delay outgoing shares by a set number of seconds.",
+						disabled = function()
+							return not L.db.profile.sharing.enabled
+						end,
+						get = function()
+							return L.db.profile.sharing.delayed
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.delayed = v
+						end,
+					},
+					delaySlider = {
+						type = "range",
+						name = "Sharing Delay",
+						order = 13,
+						desc = "Seconds to wait before broadcasting a discovery when Delayed Sharing is enabled.",
+						min = 15,
+						max = 60,
+						step = 1,
+						disabled = function()
+							return not L.db.profile.sharing.enabled or not L.db.profile.sharing.delayed
+						end,
+						get = function()
+							return L.db.profile.sharing.delaySeconds
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.delaySeconds = v
+						end,
+					},
+					allowShowRequests = {
+						type = "toggle",
+						name = "Allow 'Show' Requests",
+						order = 14,
+						desc = "Allow other players to send you discovery locations to view on your map.",
+						disabled = function() return not L.db.profile.sharing.enabled end,
+						get = function() return L.db.profile.sharing.allowShowRequests end,
+						set = function(_, v) L.db.profile.sharing.allowShowRequests = v end,
+					},
+					dataTypesHeader = {
+						type = "header",
+						name = "Data Types",
+						order = 14.1,
+					},
+					disableMysticScrolls = {
+						type = "toggle",
+						name = "Disable Mystic Scrolls",
+						desc = "If checked, Mystic Scroll discoveries will not be recorded, shared, or received from others.",
+						order = 14.2,
+						hidden = IsMysticScrollsHidden,
+						get = function() return L.db.profile.disableMysticScrolls end,
+						set = function(_, v) 
+						    L.db.profile.disableMysticScrolls = v 
+						    
+						    local Constants = L:GetModule("Constants", true)
+						    if Constants and Constants.UpdateAllowedTypes then
+							  Constants:UpdateAllowedTypes()
+						    end
+						end,
+					},
+					removeInvalidDiscoveries = {
+						type = "execute",
+						name = "Remove invalid discoveries",
+						desc = "Deletes pins that are not Worldforged (or Mystic Scrolls on this realm), then restores StarterDB locations. Looted flags are kept. Does not override your database.",
+						order = 14.3,
+						func = function()
+							StaticPopup_Show("LOOTCOLLECTOR_CLEAN_INVALID")
+						end,
+					},
+					syncHeader = {
+						type = "header",
+						name = "Sync Restrictions",
+						order = 19,
+					},
+					rejectPartySync = {
+						type = "toggle",
+						name = "Block Party/Raid Sync",
+						order = 20,
+						desc = "Ignore discovery sync messages received from party or raid members.",
+						get = function()
+							return L.db.profile.sharing.rejectPartySync
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.rejectPartySync = v
+						end,
+					},
+					rejectGuildSync = {
+						type = "toggle",
+						name = "Block Guild Sync",
+						order = 21,
+						desc = "Ignore discovery sync messages received from guild members.",
+						get = function()
+							return L.db.profile.sharing.rejectGuildSync
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.rejectGuildSync = v
+						end,
+					},
+					rejectWhisperSync = {
+						type = "toggle",
+						name = "Block Whisper Sync",
+						order = 22,
+						desc = "Ignore discovery sync messages received via whisper.",
+						get = function()
+							return L.db.profile.sharing.rejectWhisperSync
+						end,
+						set = function(_, v)
+							L.db.profile.sharing.rejectWhisperSync = v
+						end,
+					},
+					playerListsHeader = {
+						type = "header",
+						name = "Player Lists",
+						order = 29.9,
+					},
+					blockList = {
+						type = "input",
+						multiline = 5,
+						width = "full",
+						order = 30,
+						name = "Blocked Players",
+						desc = "One player per line. Blocks messages sent from these players or discoveries originally found by them.",
+						get = function()
+							return listToString(L.db.profile.sharing.blockList)
+						end,
+						set = function(_, v)
+							stringToList(v, L.db.profile.sharing.blockList)
+                            
+                            if L.SyncInvalidSendersWithBlockList then
+                                L:SyncInvalidSendersWithBlockList()
+                            end
+						end,
+					},
+					purgeGroup = {
+						type = "group",
+						name = "",
+						order = 30.1,
+						inline = true,
+						args = {
+							spacer = {
+								type = "description",
+								name = "",
+								width = "full",
+								order = 1,
+							},
+							purgeBlockedData = {
+								type = "execute",
+								name = "Purge Blocked Players Discoveries",
+								desc = "Removes all discoveries from your database where the original finder ('fp') is on your block list.",
+								order = 2,
+								func = function()
+									local Core = L:GetModule("Core", true)
+									if Core and Core.PurgeDiscoveriesFromBlockedPlayers then
+										Core:PurgeDiscoveriesFromBlockedPlayers()
+									else
+										print("|cffff7f00LootCollector:|r Core module not available to perform purge.")
+									end
+								end,
+							},
+						},
+					},
+					versionFilteringHeader = {
+						type = "header",
+						name = "Addon Version Filtering",
+						order = 25,
+					},
+					versionDesc = {
+						type = "description",
+						name = "Uncheck a 1.0.0+ build to block that exact string. Builds below 1.0.0 are listed under Untrusted Versions and cannot be trusted. The Minimum Version Gate also drops them.",
+						order = 26,
+					},
+					minVersionGateOverride = {
+						type = "select",
+						name = "Minimum Version Gate",
+						desc = "Discoveries from players using addon versions older than this will be automatically dropped. Cannot be set below 1.0.0.",
+						order = 27,
+						values = function()
+							local values = {}
+							if L.db.profile.sharing.seenVersions then
+								for ver, _ in pairs(L.db.profile.sharing.seenVersions) do
+									if IsVersionAtLeastMin(ver) then
+										values[ver] = ver
+									end
+								end
+							end
+							values[L.Version] = L.Version
+							local minVer = GetMinCompatibleVersion()
+							values[minVer] = minVer
+							return values
+						end,
+						get = function()
+							local defaultMin = GetMinCompatibleVersion()
+							local cur = L.db.profile.sharing.minVersionGateOverride or defaultMin
+							if not IsVersionAtLeastMin(cur) then
+								return defaultMin
+							end
+							return cur
+						end,
+						set = function(_, v)
+							if not IsVersionAtLeastMin(v) then return end
+							L.db.profile.sharing.minVersionGateOverride = v
+						end,
+					},
+					versionFilters = {
+						type = "multiselect",
+						name = "Trusted Versions Checklist",
+						desc = "1.0.0+ start checked. Uncheck a version to block that exact build.",
+						order = 28,
+						values = function()
+							local values = {}
+							if L.db.profile.sharing.seenVersions then
+								for ver, _ in pairs(L.db.profile.sharing.seenVersions) do
+									if IsVersionAtLeastMin(ver) then
+										values[ver] = ver
+									end
+								end
+							end
+							values[L.Version] = L.Version
+							local minVer = GetMinCompatibleVersion()
+							values[minVer] = minVer
+							return values
+						end,
+						get = function(_, key)
+							if not IsVersionAtLeastMin(key) then
+								return false
+							end
+							if L.db.profile.sharing.blockedVersions and L.db.profile.sharing.blockedVersions[key] then
+								return false
+							end
+							return true
+						end,
+						set = function(_, key, state)
+							if not IsVersionAtLeastMin(key) then
+								L.db.profile.sharing.blockedVersions = L.db.profile.sharing.blockedVersions or {}
+								L.db.profile.sharing.blockedVersions[key] = true
+								return
+							end
+							L.db.profile.sharing.blockedVersions = L.db.profile.sharing.blockedVersions or {}
+							if state then
+								L.db.profile.sharing.blockedVersions[key] = nil
+							else
+								L.db.profile.sharing.blockedVersions[key] = true
+							end
+						end,
+					},
+					selectAllVersions = {
+						type = "execute",
+						name = "Select All",
+						desc = "Check all 1.0.0+ versions. Untrusted builds stay untrusted.",
+						order = 28.1,
+						width = "half",
+						func = function()
+							BlockOutdatedSeenVersions()
+							local blocked = L.db.profile.sharing.blockedVersions
+							if not blocked then return end
+							local toClear = {}
+							for ver in pairs(blocked) do
+								if IsVersionAtLeastMin(ver) then
+									table.insert(toClear, ver)
+								end
+							end
+							for _, ver in ipairs(toClear) do
+								blocked[ver] = nil
+							end
+						end,
+					},
+					deselectAllVersions = {
+						type = "execute",
+						name = "Deselect All",
+						desc = "Uncheck all Trusted Versions (1.0.0+ exact-string block).",
+						order = 28.2,
+						width = "half",
+						func = function()
+							L.db.profile.sharing.blockedVersions = L.db.profile.sharing.blockedVersions or {}
+							if L.db.profile.sharing.seenVersions then
+								for ver, _ in pairs(L.db.profile.sharing.seenVersions) do
+									if IsVersionAtLeastMin(ver) then
+										L.db.profile.sharing.blockedVersions[ver] = true
+									end
+								end
+							end
+							L.db.profile.sharing.blockedVersions[L.Version] = true
+							local minVer = GetMinCompatibleVersion()
+							L.db.profile.sharing.blockedVersions[minVer] = true
+						end,
+					},
+					untrustedVersionsHeader = {
+						type = "header",
+						name = "Untrusted Versions",
+						order = 29,
+						hidden = function()
+							return not HasOutdatedSeenVersions()
+						end,
+					},
+					untrustedVersionsDesc = {
+						type = "description",
+						name = "These builds are below 1.0.0. Discoveries from them are dropped. They cannot be trusted.",
+						order = 29.1,
+						hidden = function()
+							return not HasOutdatedSeenVersions()
+						end,
+					},
+					untrustedVersionsList = {
+						type = "description",
+						fontSize = "medium",
+						order = 29.2,
+						hidden = function()
+							return not HasOutdatedSeenVersions()
+						end,
+						name = function()
+							local list = CollectOutdatedSeenVersions()
+							if #list == 0 then return "" end
+							return table.concat(list, "\n")
+						end,
+					},
+					whiteList = {
+						type = "input",
+						multiline = 5,
+						width = "full",
+						order = 31,
+						name = "Whitelisted Players",
+						desc = "If this list is not empty, only these players' discoveries are accepted.",
+						get = function()
+							return listToString(L.db.profile.sharing.whiteList)
+						end,
+						set = function(_, v)
+							stringToList(v, L.db.profile.sharing.whiteList)
+						end,
+					},
+				},
+			},
+
+			advanced = {
+				type = "group",
+				name = "Advanced",
+				inline = false,
+				order = 40,
+				args = {
+					realmOverridesHeader = {
+						type = "header",
+						name = "Realm Capability Overrides",
+						order = 1,
+					},
+					overrideDesc = {
+						type = "description",
+						name = "LootCollector automatically detects the Ascension Realm type to optimize UI and features. If detection fails, you can force the mode here.\n|cffff0000Requires a /reload to apply changes.|r",
+						order = 2,
+					},
+					realmTypeOverride = {
+						type = "select",
+						name = "Active Realm Mode",
+						order = 3,
+						width = 1.6,
+						desc = "Force a specific Ascension realm mode if auto-detection is wrong. Changing this may purge incompatible data (especially switching to CoA).",
+						values = {
+							["AUTO"] = "Auto-Detect (Recommended)",
+							["WR"] = "Warcraft Reborn (Bronzebeard) + Mystic Scrolls",
+							["CLASSLESS"] = "Freepick (Dawnrise / Area 52) + Mystic Scrolls",
+							["WILDCARD"] = "Wildcard (Darkmoon) + Mystic Scrolls",
+							["COA"] = "CoA (Rexxar / Vol'jin) - No Scrolls",
+						},
+						get = function() return L.db.profile.featureOverrides.realmType end,
+						set = function(_, v) 
+						    if v == "COA" then
+						        StaticPopup_Show("LOOTCOLLECTOR_COA_OVERRIDE_WARNING")
+						    else
+								L.db.profile.featureOverrides.realmType = v
+								local Constants = L:GetModule("Constants", true)
+								if Constants and Constants.DetermineRealmCapabilities then
+									Constants:DetermineRealmCapabilities()
+									Constants:UpdateAllowedTypes()
+								end
+								print("|cff00ff00LootCollector:|r Realm mode manually set to " .. v .. ".")
+								
+								StaticPopup_Show("LOOTCOLLECTOR_REALM_OVERRIDE_RELOAD")
+						    end
+						end,
+					},
+				},
+			},
+
+			about = {
+				type = "group",
+				name = "About",
+				order = 99,
+				args = {
+					intro_text = {
+						type = "description",
+						name = "Hi there!\n\nThis addon was created by Skulltrail originally, his first-ever WoW addon!\n\nA huge thank you to all the contributors for their hard work and support. This addon wouldn't be possible without your help!\nSpecial thanks to: |cffFFD700Deidre, Rhenyra, Morty, Markosz, Bandit Tech, xan, Stilnight, Xurkon, Netherborne, Liakate, Jollyg7|r, and all the community helpers out there.\n\nI would also like to extend a special thank you to |cffFFD700@ERitzman|r for being our first-ever LootCollector sponsor!\n\nContact: Discord @JOLLYG7!",
+						fontSize = "large",
+						order = 10,
+					},
+					download_desc = {
+						type = "description",
+						name = "\nShare or download the addon from GitHub (Ctrl+C in the popup):",
+						fontSize = "medium",
+						order = 20,
+					},
+					download_button = {
+						type = "execute",
+						name = "• Download (GitHub)",
+						order = 21,
+						func = function()
+							local url = "https://github.com/gerob/LootCollector"
+							OpenCopyPopup("LootCollector Download", url)
+							print("|cff00ff00LootCollector Download:|r " .. url)
+						end,
+					},
+					donations_desc = {
+						type = "description",
+						name = "\nFor those who'd like to support development, sponsorships are welcome at:",
+						fontSize = "medium",
+						order = 41,
+					},
+					github_button = {
+						type = "execute",
+						name = "• GitHub Sponsors",
+						order = 43,
+						func = function()
+							OpenCopyPopup("GitHub Sponsors", "https://github.com/sponsors/gerob")
+						end,
+					},
+					ingame_mail_desc = {
+						type = "description",
+						name = "• In-game mailbox @JLY",
+						fontSize = "medium",
+						order = 44,
+					},
+				}
+			},
+		},
+	}
+	return opts
+end
+
+function Settings:OnInitialize()
+	
+	
+	local function showLegacyMessage()
+		print("|cffff0000LootCollector is in Legacy Mode!|r")
+		print("|cffffff00Your database is from an older version and needs to be updated.|r")
+		print("  - Type |cff00ff00/lcpreserve|r to migrate your data now.")
+		print("  - Type |cffff7f00/reload|r to see the migration pop-up again.")
+	end
+
+	if L.LEGACY_MODE_ACTIVE then
+		
+		self:RegisterChatCommand("lc", showLegacyMessage)
+		self:RegisterChatCommand("lootcollector", showLegacyMessage)
+		SLASH_LCLIST1 = "/lclist"
+		SlashCmdList["LCLIST"] = showLegacyMessage
+		return 
+	end
+
+	
+	if not (L.db and L.db.profile) then return end
+	ensureDefaults()
+
+	if AceConfig and AceConfigDialog then
+		AceConfig:RegisterOptionsTable("LootCollector", buildOptions)
+		AceConfigDialog:AddToBlizOptions("LootCollector", "LootCollector")
+
+		local function openOptions(tab)
+			InterfaceOptionsFrame_OpenToCategory("LootCollector")
+			if tab == "discoveries" then
+				InterfaceOptionsFrame_OpenToCategory("Discoveries")
+			end
+		end
+
+		self:RegisterChatCommand("lc", function(input)
+			local tab = input:match("%S+")
+			if tab == "reset" or tab == "resetbutton" or tab == "resetmap" then
+				local Map = L:GetModule("Map", true)
+				if Map and Map.ResetFilterButtonPosition then
+					Map:ResetFilterButtonPosition()
+				end
+				return
+			end
+			openOptions(tab)
+		end)
+		self:RegisterChatCommand("lootcollector", function(input)
+			local tab = input:match("%S+")
+			if tab == "reset" or tab == "resetbutton" or tab == "resetmap" then
+				local Map = L:GetModule("Map", true)
+				if Map and Map.ResetFilterButtonPosition then
+					Map:ResetFilterButtonPosition()
+				end
+				return
+			end
+			openOptions(tab)
+		end)
+	else
+		
+		SLASH_LootCollectorCFG1 = "/lc"
+		SlashCmdList["LootCollectorCFG"] = function(msg)
+			msg = msg or ""
+			local cmd, val = msg:match("(%S+)%s*(%S*)")
+			cmd = (cmd or ""):lower()
+			if cmd == "reset" or cmd == "resetbutton" or cmd == "resetmap" then
+				local Map = L:GetModule("Map", true)
+				if Map and Map.ResetFilterButtonPosition then
+					Map:ResetFilterButtonPosition()
+				end
+				return
+			end
+			local on = not (val == "0" or val == "off" or val == "false")
+			if cmd == "sharing" then
+				L.db.profile.sharing.enabled = on
+				print(string.format("|cff00ff00LootCollector|r sharing.enabled=%s", tostring(on)))
+				local Comm = L:GetModule("Comm", true)
+				if Comm then
+					if on then
+						Comm:JoinPublicChannel(true)
+					else
+						Comm:LeavePublicChannel()
+					end
+				end
+			elseif cmd == "toasts" or cmd == "hideall" or cmd == "hidefaded" or cmd == "hidestale" or cmd == "hidelooted" then
+				local setting = (cmd == "toasts" and "toasts" or "mapFilters")
+				local key = (cmd == "toasts" and "enabled" or cmd)
+				L.db.profile[setting][key] = on
+				print(string.format("|cff00ff00LootCollector|r %s.%s=%s", setting, key, tostring(on)))
+				refreshUI()
+			else
+				print("|cff00ff00LootCollector|r /lc sharing on|off, toasts on/off, hideall on/off, etc.")
+			end
+		end
+	end
+
+	SLASH_LootCollectorTOP1 = "/lctop"
+	SlashCmdList["LootCollectorTOP"] = ShowTopContributors
+end
+
+return Settings
