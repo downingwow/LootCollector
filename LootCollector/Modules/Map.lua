@@ -1951,20 +1951,9 @@ local function GetFilterButtonChromeAnchor()
       return anchorFrame, "RIGHT", "LEFT", -2, 0
     end
   end
-  if WorldMapFrame then
-    local i = 1
-    while true do
-      local child = select(i, WorldMapFrame:GetChildren())
-      if not child then break end
-      i = i + 1
-      if child ~= FilterButton and child:IsObjectType("Button") and child:IsShown() and child.GetText then
-        local text = child:GetText()
-        if text and text:find("Mapster") then
-          return child, "RIGHT", "LEFT", -2, 0
-        end
-      end
-    end
-  end
+  -- Do not enumerate WorldMapFrame:GetChildren(): on crowded 3.3.5a
+  -- maps the multi-return list can overflow Lua's stack. Named anchors
+  -- above are sufficient; fall back to Blizzard's size/close controls.
 
   local sizeBtn = ShownChromeButton("WorldMapFrameSizeDownButton")
       or ShownChromeButton("WorldMapFrameSizeUpButton")

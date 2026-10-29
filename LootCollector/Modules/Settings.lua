@@ -1727,7 +1727,7 @@ local function buildOptions()
 						name = "• Download (GitHub)",
 						order = 21,
 						func = function()
-							local url = "https://github.com/gerob/LootCollector"
+							local url = "https://github.com/downingwow/LootCollector"
 							OpenCopyPopup("LootCollector Download", url)
 							print("|cff00ff00LootCollector Download:|r " .. url)
 						end,

@@ -1,4 +1,4 @@
-## Version 1.0.6
+## CoA v1.0.7 — Uncle Bone\n- Map stack overflow hotfix retained.\n- Updated project contact and download links to https://github.com/downingwow/LootCollector.\n- Original upstream changelog retained below for attribution.\n\n## Version 1.0.6
 
 ### Pin cleanup (login)
 - Leftover-xy merge: same Worldforged item, similar map fractions, different leftover maps → one pin. Looted remaps to the keep pin.

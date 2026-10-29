@@ -1,9 +1,13 @@
 ## Interface: 30300
-## Title: |cffe5cc80LootCollector|r |cffe5cc80[1.0.6 + Rare/Chest Tracker]|r
+## Title: |cffe5cc80LootCollector|r |cffe5cc80[CoA 1.0.7 + Rare/Chest Tracker]|r
 ## Notes: Community discovery and sharing for Ascension Conquest of Azeroth. Maintained by Uncle Bone. GitHub: github.com/downingwow
 ## Author: Uncle Bone (CoA maintainer)
 ## X-Upstream-Contributors: Deidre, Rhenyra, Morty, Markosz, Bandit Tech, xan, Stilnight, Xurkon, Netherborne, Jollyg
-## Version: 1.0.6
+## Version: 1.0.7
+## X-CoA-Version: 1.0.7
+## X-Upstream-Version: 1.0.6
+## X-Maintainer: Uncle Bone
+## X-Website: https://github.com/downingwow/LootCollector
 ## SavedVariables: LootCollectorDB_Asc
 ## OptionalDeps: Ace3, TomTom, AtlasLoot_Cache
 

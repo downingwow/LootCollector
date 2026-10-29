@@ -81,7 +81,7 @@ Some actions may require a supported target, zone, or correctly formatted record
 
 ## Current build and limits
 
-**Latest package located:** *LootCollector — Safe Channel Startup*, based on **LootCollector 1.0.6 + Rare/Chest Tracker**. The addon source folders have now been uploaded to this repository. **A downloadable GitHub Release has not yet been published.** [Downloads and version history](https://github.com/downingwow/LootCollector/releases).
+**Current source build: v1.0.7.** Map stack-overflow fix and CoA release metadata. Installable ZIPs and version history are published through [GitHub Releases](https://github.com/downingwow/LootCollector/releases).
 
 - Loot-table data grows from observations and is not necessarily complete.
 - Rare/chest locations and timers may be approximate.
@@ -93,3 +93,8 @@ Some actions may require a supported target, zone, or correctly formatted record
 Original LootCollector by **Skulltrail**, with contributions from Deidre, Rhenyra, Morty, Markosz, Bandit Tech, xan, Stilnight, Xurkon, Netherborne, Jollyg, and others credited in the addon. CoA rare/chest extensions and distribution maintained by **Uncle Bone**. Community project, not an official Ascension release.
 
 [Report a bug / request a feature](https://github.com/downingwow/LootCollector/issues) · [Changelog](CHANGELOG.md)
+
+
+## v1.0.7 changes
+
+Includes the map stack-overflow fix and aligned CoA version metadata. Existing SavedVariables, rare/chest learning and cooperative BBLC25C sharing are retained.

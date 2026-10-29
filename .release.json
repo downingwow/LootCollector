@@ -1,0 +1,9 @@
+{
+  "version": "v1.0.7",
+  "prerelease": false,
+  "folders": [
+    "LootCollector",
+    "LootCollector_CustomImport",
+    "LootCollector_StarterDB"
+  ]
+}
