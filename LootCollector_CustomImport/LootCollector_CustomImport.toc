@@ -1,8 +1,10 @@
 ## Interface: 30300
 ## Title: LootCollector Custom Import
 ## Notes: Place large import strings in the customimport.lua file here to avoid pasting freezes.
-## Author: Skulltrail
+## Author: Uncle Bone (CoA maintainer)
 ## LoadOnDemand: 1
 ## Dependencies: LootCollector
 
 customimport.lua
+## X-Upstream-Author: Skulltrail
+## X-Contact: https://github.com/downingwow

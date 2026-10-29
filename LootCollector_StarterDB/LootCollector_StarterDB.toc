@@ -1,9 +1,11 @@
 ## Interface: 30300
 ## Title: LootCollector Starter DB
 ## Notes: Contains the optional starter database for LootCollector.
-## Author: Skulltrail
+## Author: Uncle Bone (CoA maintainer)
 ## Version: v7.0
 ## LoadOnDemand: 1
 ## Dependencies: LootCollector
 
 db.lua
+## X-Upstream-Author: Skulltrail
+## X-Contact: https://github.com/downingwow
