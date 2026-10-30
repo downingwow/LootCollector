@@ -1,9 +1,9 @@
-# LootCollector v1.0.7
+# LootCollector-CoA v1.0.9 — Map rollback
 
-Map stack-overflow fix and CoA release metadata.
+- Publishes the latest map rollback package following the v1.0.8 marker-restoration attempt.
+- Retains the community discovery viewer, Worldforged tracking, rare/chest records, loot observations, imports and companion databases present in the package.
+- Existing BBLC25C sharing and saved data remain intact.
 
-
-Install the addon folders from the attached ZIP side by side in `Interface/AddOns`. Preserve WTF/SavedVariables. See the repository README for features, commands, dependencies and limitations.
+Install LootCollector, LootCollector_CustomImport and LootCollector_StarterDB side by side in Interface/AddOns. Preserve LootCollectorDB_Asc. This rollback does not establish that all UI-specific map-marker issues are resolved; test map pins in your client.
 
 Maintainer: Uncle Bone — https://github.com/downingwow
-Original licenses and attribution are preserved.

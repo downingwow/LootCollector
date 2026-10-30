@@ -1,3 +1,8 @@
+## CoA v1.0.8 — World map marker restoration
+- Fall back to WorldMapButton geometry when UI replacements provide invalid detail-frame geometry.
+- Retry map pin rendering when map layout is not yet ready.
+- Preserve the v1.0.7 stack overflow fix and shared channel handling.
+
 ## CoA v1.0.7 — Uncle Bone\n- Map stack overflow hotfix retained.\n- Updated project contact and download links to https://github.com/downingwow/LootCollector.\n- Original upstream changelog retained below for attribution.\n\n## Version 1.0.6
 
 ### Pin cleanup (login)

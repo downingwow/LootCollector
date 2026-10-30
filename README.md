@@ -1,5 +1,18 @@
 # LootCollector — Find, Track & Share Worldforged Loot, Rares and Treasure
 
+## Current release
+
+# LootCollector-CoA v1.0.9 — Map rollback
+
+- Publishes the latest map rollback package following the v1.0.8 marker-restoration attempt.
+- Retains the community discovery viewer, Worldforged tracking, rare/chest records, loot observations, imports and companion databases present in the package.
+- Existing BBLC25C sharing and saved data remain intact.
+
+Install LootCollector, LootCollector_CustomImport and LootCollector_StarterDB side by side in Interface/AddOns. Preserve LootCollectorDB_Asc. This rollback does not establish that all UI-specific map-marker issues are resolved; test map pins in your client.
+
+Maintainer: Uncle Bone — https://github.com/downingwow
+
+
 **LootCollector helps you remember where valuable things have been found in Conquest of Azeroth—and learn from discoveries made by other players.** It began as a community-driven tracker for **Worldforged items and Mystic Scrolls** and has been extended with **rare-creature, treasure-chest, and loot-learning features** for Ascension: Conquest of Azeroth / Conquest Reborn.
 
 ## What it does for a player
@@ -81,7 +94,7 @@ Some actions may require a supported target, zone, or correctly formatted record
 
 ## Current build and limits
 
-**Current source build: v1.0.7.** Map stack-overflow fix and CoA release metadata. Installable ZIPs and version history are published through [GitHub Releases](https://github.com/downingwow/LootCollector/releases).
+**Current source build: v1.0.9.** Map stack-overflow fix and CoA release metadata. Installable ZIPs and version history are published through [GitHub Releases](https://github.com/downingwow/LootCollector/releases).
 
 - Loot-table data grows from observations and is not necessarily complete.
 - Rare/chest locations and timers may be approximate.
@@ -95,6 +108,7 @@ Original LootCollector by **Skulltrail**, with contributions from Deidre, Rhenyr
 [Report a bug / request a feature](https://github.com/downingwow/LootCollector/issues) · [Changelog](CHANGELOG.md)
 
 
-## v1.0.7 changes
+## Earlier v1.0.7 changes
 
 Includes the map stack-overflow fix and aligned CoA version metadata. Existing SavedVariables, rare/chest learning and cooperative BBLC25C sharing are retained.
+

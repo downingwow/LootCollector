@@ -30,7 +30,7 @@ jobs:
           out=root/'dist';out.mkdir(exist_ok=True)
           artifact=out/(os.environ['GITHUB_REPOSITORY'].split('/')[-1]+'-'+cfg['version']+'.zip')
           with zipfile.ZipFile(artifact,'w',zipfile.ZIP_DEFLATED) as z:
-              for name in folders:
+              for name in folders + cfg.get('extras', []):
                   for p in sorted((root/name).rglob('*')):
                       if p.is_file() and p.name not in ('.DS_Store','Thumbs.db'):
                           z.write(p,p.as_posix())
@@ -52,3 +52,4 @@ jobs:
             exit 1
           fi
           gh release create "$VERSION" "$ASSET" --target "$GITHUB_SHA" --title "${GITHUB_REPOSITORY#*/} $VERSION" --notes-file RELEASE-NOTES.md "${args[@]}"
+
