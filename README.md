@@ -1,5 +1,8 @@
 # LootCollector — Find, Track & Share Worldforged Loot, Rares and Treasure
 
+> **[⬇ Download v1.0.9]( https://github.com/downingwow/LootCollector/releases/download/v1.0.9/LootCollector-v1.0.9.zip )**
+
+
 ## Current release
 
 # LootCollector-CoA v1.0.9 — Map rollback
